@@ -4,49 +4,73 @@ import networkx as nx
 from collections import Counter
 import pickle
 import requests
+import zipfile
 import io
 
 # ===========================================================
-# 📌 1. Fonction fiable pour télécharger un fichier Drive
+# 🔧 1. Téléchargement Google Drive (gros fichiers)
 # ===========================================================
-def load_from_drive(file_id):
-    """Télécharge un fichier Google Drive via son ID."""
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    response = requests.get(url)
+def load_from_drive_big(file_id):
+    """Télécharge un fichier depuis Google Drive, même lourd, même protégé."""
+    URL = "https://docs.google.com/uc?export=download"
+    session = requests.Session()
+
+    response = session.get(URL, params={'id': file_id}, stream=True)
+
+    # Vérifier TOKEN Google Drive
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            response = session.get(
+                URL,
+                params={'id': file_id, 'confirm': value},
+                stream=True
+            )
+            break
+
     return response.content
 
 
 # ===========================================================
-# 📌 2. IDs Drive (PAS LES URLs ENTIÈRES)
+# 🔗 2. IDs Google Drive des fichiers
 # ===========================================================
-ID_DF = "1BBVNK0RgL3S4PryNmYNse70C4L8SGhsk"
-ID_GRAPHS = "1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"
-ID_PARTS = "1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
-
-
-# ===========================================================
-# 📌 3. Chargement des fichiers
-# ===========================================================
-st.write("⏳ Chargement des données...")
-
-# CSV
-df = pd.read_csv(
-    io.BytesIO(load_from_drive(ID_DF)),
-    encoding="utf-8",
-    on_bad_lines="skip"
-)
-
-# Pickle graphes
-all_graphs = pickle.load(io.BytesIO(load_from_drive(ID_GRAPHS)))
-
-# Pickle partitions
-all_partitions = pickle.load(io.BytesIO(load_from_drive(ID_PARTS)))
-
-st.success("✔️ Données chargées avec succès !")
+ID_ZIP = "1nizxGHWa216MurrblfuxtzV6dvmB09lc"       # dataset_clean.csv (dans ZIP)
+ID_GRAPHS = "1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"    # all_graphs.pkl
+ID_PARTS = "1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"      # all_partitions.pkl
 
 
 # ===========================================================
-# 🎨 4. Thème CSS
+# 📥 3. Chargement du dataset depuis le ZIP
+# ===========================================================
+@st.cache_data(show_spinner=True)
+def load_dataset():
+    zip_bytes = load_from_drive_big(ID_ZIP)
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        with z.open("dataset_clean.csv") as f:
+            df = pd.read_csv(f, encoding="utf-8", on_bad_lines="skip")
+    return df
+
+df = load_dataset()
+
+
+# ===========================================================
+# 📥 4. Chargement graphes + partitions
+# ===========================================================
+@st.cache_resource(show_spinner=True)
+def load_graphs():
+    graphs_bytes = load_from_drive_big(ID_GRAPHS)
+    return pickle.load(io.BytesIO(graphs_bytes))
+
+@st.cache_resource(show_spinner=True)
+def load_partitions():
+    parts_bytes = load_from_drive_big(ID_PARTS)
+    return pickle.load(io.BytesIO(parts_bytes))
+
+all_graphs = load_graphs()
+all_partitions = load_partitions()
+
+
+# ===========================================================
+# 🎨 5. Thème graphique
 # ===========================================================
 st.markdown("""
 <style>
@@ -58,14 +82,22 @@ h2 { color: #4F46E5; font-weight: 700; margin-top: 30px; }
 
 
 # ===========================================================
-# 🏷️ 5. Titre
+# 🏷️ 6. Titre principal
 # ===========================================================
-st.title("🎮 Recommandation de Jeux – Analyse SNA")
-st.write("Recommandations basées sur les graphes et les communautés Louvain.")
+st.title("🎮 Système de Recommandation de Jeux – Analyse de Réseaux (SNA)")
+st.write("""
+Cette application utilise :
+
+- 🧩 Les graphes bipartites joueurs–jeux  
+- 🧭 L’algorithme de **Louvain** pour détecter les communautés  
+- 🤖 Trois stratégies de recommandation
+
+Toutes les données sont chargées dynamiquement depuis Google Drive.
+""")
 
 
 # ===========================================================
-# 🔵 6. Recommandation PAR JEU
+# 🔵 7. Recommandation par jeu
 # ===========================================================
 st.header("🔵 Recommandation par Jeu")
 
@@ -73,28 +105,26 @@ asin = st.text_input("Entrer un ASIN")
 year = st.number_input("Année", min_value=1999, max_value=2018, step=1)
 
 if st.button("Recommander pour ce jeu"):
-    if year in all_graphs and asin in all_partitions[year]:
-
-        part = all_partitions[year]
+    if year not in all_graphs:
+        st.error("Année non trouvée.")
+    elif asin not in all_partitions[year]:
+        st.error("ASIN introuvable dans cette année.")
+    else:
         G = all_graphs[year]
+        part = all_partitions[year]
 
         comm = part.get(asin)
+        st.info(f"Communauté du jeu : **{comm}**")
 
-        if comm is None:
-            st.error("Ce jeu n'existe pas dans cette année.")
-        else:
-            st.info(f"Communauté du jeu : **{comm}**")
-            comm_games = [g for g, c in part.items() if c == comm and g != asin]
-            top = sorted(comm_games, key=lambda g: G.degree(g), reverse=True)[:10]
+        comm_games = [g for g, c in part.items() if c == comm and g != asin]
+        top = sorted(comm_games, key=lambda g: G.degree(g), reverse=True)[:10]
 
-            st.success("Top recommandations :")
-            st.write(top)
-    else:
-        st.error("ASIN non trouvé.")
+        st.success("Top recommandations :")
+        st.write(top)
 
 
 # ===========================================================
-# 🟢 7. Recommandation PAR UTILISATEUR
+# 🟢 8. Recommandation par utilisateur
 # ===========================================================
 st.header("🟢 Recommandation par Utilisateur")
 
@@ -106,47 +136,54 @@ if st.button("Recommander pour cet utilisateur"):
     if user_games.empty:
         st.error("Utilisateur introuvable.")
     else:
+        # Liste des communautés fréquentes chez l'utilisateur
         community_list = []
+
         for _, row in user_games.iterrows():
             y = row["year"]
             g = row["asin"]
-            if g in all_partitions[y]:
+            if y in all_partitions and g in all_partitions[y]:
                 community_list.append(all_partitions[y][g])
 
-        dominant_comm = Counter(community_list).most_common(1)[0][0]
-        st.info(f"Communauté dominante : **{dominant_comm}**")
+        if len(community_list) == 0:
+            st.error("Impossible d'identifier une communauté dominante.")
+        else:
+            dominant_comm = Counter(community_list).most_common(1)[0][0]
+            st.info(f"Communauté dominante : **{dominant_comm}**")
 
-        sample_year = int(user_games["year"].mode()[0])
-        G = all_graphs[sample_year]
-        part = all_partitions[sample_year]
+            sample_year = int(user_games["year"].mode()[0])
+            G = all_graphs[sample_year]
+            part = all_partitions[sample_year]
 
-        comm_games = [g for g, c in part.items() if c == dominant_comm]
-        played = user_games["asin"].tolist()
+            comm_games = [g for g, c in part.items() if c == dominant_comm]
+            played = set(user_games["asin"])
 
-        recos = [g for g in comm_games if g not in played]
-        top = sorted(recos, key=lambda g: G.degree(g), reverse=True)[:10]
+            recos = [g for g in comm_games if g not in played]
+            top = sorted(recos, key=lambda g: G.degree(g), reverse=True)[:10]
 
-        st.success("Recommandations personnalisées :")
-        st.write(top)
+            st.success("Recommandations personnalisées :")
+            st.write(top)
 
 
 # ===========================================================
-# 🔴 8. Explorer une communauté
+# 🔴 9. Exploration d’une communauté
 # ===========================================================
 st.header("🔴 Explorer une Communauté")
 
-year_c = st.number_input("Année de la communauté", min_value=1999, max_value=2018, step=1)
+year_c = st.number_input("Année", min_value=1999, max_value=2018, step=1)
 comm_c = st.number_input("ID de communauté", min_value=0, step=1)
 
 if st.button("Afficher la communauté"):
-    if year_c in all_graphs:
+    if year_c not in all_graphs:
+        st.error("Année non trouvée.")
+    else:
         G = all_graphs[year_c]
         part = all_partitions[year_c]
 
         comm_games = [g for g, c in part.items() if c == comm_c]
 
         if len(comm_games) == 0:
-            st.error("Communauté vide ou inexistante.")
+            st.error("Communauté vide.")
         else:
             top = sorted(comm_games, key=lambda g: G.degree(g), reverse=True)[:15]
             st.success(f"Top jeux de la communauté {comm_c}")
