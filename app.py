@@ -7,56 +7,42 @@ import requests
 import io
 
 # ===========================================================
-# 🔥 1. Fonction spéciale pour télécharger les gros fichiers Drive
+# 📌 1. Fonction de téléchargement depuis Google Drive
 # ===========================================================
 
 def load_from_drive(url):
-    session = requests.Session()
-    response = session.get(url, stream=True)
-
-    # Si Google Drive bloque le téléchargement → HTML renvoyé
-    if "text/html" in response.headers.get("Content-Type", ""):
-        for key, value in response.cookies.items():
-            if key.startswith("download_warning"):
-                confirm_url = url + "&confirm=" + value
-                response = session.get(confirm_url, stream=True)
-                break
-
+    """Télécharge un fichier Google Drive et retourne son contenu brut."""
+    response = requests.get(url)
     return response.content
 
 
 # ===========================================================
-# 🔥 2. Liens Drive (toujours ce format : uc?export=download&id=xxxx)
+# 📌 2. URLs Google Drive (format ?export=download)
 # ===========================================================
 
 URL_DF = "https://drive.google.com/uc?export=download&id=1BBVNK0RgL3S4PryNmYNse70C4L8SGhsk"
 URL_GRAPHS = "https://drive.google.com/uc?export=download&id=1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"
-URL_PARTS  = "https://drive.google.com/uc?export=download&id=1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
+URL_PARTS = "https://drive.google.com/uc?export=download&id=1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
 
 
 # ===========================================================
-# 🔥 3. Chargement des données
+# 📌 3. Chargement des fichiers
 # ===========================================================
 
-st.write("⏳ Chargement des données... (peut prendre 10–20 secondes)")
-
-# Dataset CSV
+# Chargement dataset CSV (CORRECTIF ENCODAGE)
 df_bytes = load_from_drive(URL_DF)
-df = pd.read_csv(io.BytesIO(df_bytes), encoding="utf-8", engine="python")
+df = pd.read_csv(io.BytesIO(df_bytes), encoding="latin1")   # <<< SOLUTION UnicodeDecodeError
 
-# Graphes
+# Chargement graphes et partitions
 graphs_bytes = load_from_drive(URL_GRAPHS)
-all_graphs = pickle.load(io.BytesIO(graphs_bytes))
-
-# Partitions Louvain
 parts_bytes = load_from_drive(URL_PARTS)
+
+all_graphs = pickle.load(io.BytesIO(graphs_bytes))
 all_partitions = pickle.load(io.BytesIO(parts_bytes))
 
-st.success("✔️ Données chargées avec succès !")
-
 
 # ===========================================================
-# 🎨 4. CSS / STYLE
+# 🖌️ 4. Thème CSS
 # ===========================================================
 
 st.markdown("""
@@ -69,15 +55,15 @@ h2 { color: #4F46E5; font-weight: 700; margin-top: 30px; }
 
 
 # ===========================================================
-# 🏷️ 5. TITRE
+# 🏷️ 5. Titre
 # ===========================================================
 
-st.title("🎮 Système de Recommandation de Jeux Vidéo — SNA")
-st.write("Basé sur les graphes, les communautés Louvain et l’analyse du réseau d’utilisateurs.")
+st.title("🎮 Recommandation de Jeux – Analyse de Réseaux (SNA)")
+st.write("Système de recommandation basé sur les graphes et les communautés Louvain.")
 
 
 # ===========================================================
-# 🔵 1️⃣ Recommandation PAR JEU
+# 🔵 6. Recommandation PAR JEU
 # ===========================================================
 
 st.header("🔵 Recommandation par Jeu")
@@ -88,8 +74,8 @@ year = st.number_input("Année", min_value=1999, max_value=2018, step=1)
 if st.button("Recommander pour ce jeu"):
     if year in all_graphs and asin in all_partitions[year]:
 
-        G = all_graphs[year]
         part = all_partitions[year]
+        G = all_graphs[year]
 
         comm = part.get(asin)
 
@@ -103,13 +89,12 @@ if st.button("Recommander pour ce jeu"):
 
             st.success("Top recommandations :")
             st.write(top)
-
     else:
         st.error("ASIN non trouvé.")
 
 
 # ===========================================================
-# 🟢 2️⃣ Recommandation PAR UTILISATEUR
+# 🟢 7. Recommandation PAR UTILISATEUR
 # ===========================================================
 
 st.header("🟢 Recommandation par Utilisateur")
@@ -122,11 +107,12 @@ if st.button("Recommander pour cet utilisateur"):
     if user_games.empty:
         st.error("Utilisateur introuvable.")
     else:
-        community_list = [
-            all_partitions[row["year"]].get(row["asin"])
-            for _, row in user_games.iterrows()
-            if row["asin"] in all_partitions[row["year"]]
-        ]
+        community_list = []
+        for _, row in user_games.iterrows():
+            y = row["year"]
+            g = row["asin"]
+            if g in all_partitions[y]:
+                community_list.append(all_partitions[y][g])
 
         dominant_comm = Counter(community_list).most_common(1)[0][0]
         st.info(f"Communauté dominante : **{dominant_comm}**")
@@ -146,7 +132,7 @@ if st.button("Recommander pour cet utilisateur"):
 
 
 # ===========================================================
-# 🔴 3️⃣ Recherche de Communauté
+# 🔴 8. Exploration d'une Communauté
 # ===========================================================
 
 st.header("🔴 Explorer une Communauté")
@@ -155,14 +141,15 @@ year_c = st.number_input("Année de la communauté", min_value=1999, max_value=2
 comm_c = st.number_input("ID de communauté", min_value=0, step=1)
 
 if st.button("Afficher la communauté"):
-    part = all_partitions.get(year_c, {})
-
-    comm_games = [g for g, c in part.items() if c == comm_c]
-
-    if not comm_games:
-        st.error("Communauté vide ou inexistante.")
-    else:
+    if year_c in all_graphs:
         G = all_graphs[year_c]
-        top = sorted(comm_games, key=lambda g: G.degree(g), reverse=True)[:15]
-        st.success(f"Top jeux de la communauté {comm_c}")
-        st.write(top)
+        part = all_partitions[year_c]
+
+        comm_games = [g for g, c in part.items() if c == comm_c]
+
+        if len(comm_games) == 0:
+            st.error("Communauté vide ou inexistante.")
+        else:
+            top = sorted(comm_games, key=lambda g: G.degree(g), reverse=True)[:15]
+            st.success(f"Top jeux de la communauté {comm_c}")
+            st.write(top)
