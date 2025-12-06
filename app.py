@@ -16,10 +16,19 @@ URL_DF = "https://drive.google.com/uc?export=download&id=1BBVNK0RgL3S4PryNmYNse7
 URL_GRAPHS = "https://drive.google.com/uc?export=download&id=1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"
 URL_PARTS = "https://drive.google.com/uc?export=download&id=1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
 
-df = pd.read_csv(io.BytesIO(load_from_drive(URL_DF)))
+# Chargement sécurisé CSV
+df = pd.read_csv(
+    io.BytesIO(load_from_drive(URL_DF)),
+    encoding="utf-8",
+    errors="ignore"
+)
 
-all_graphs = pickle.load(io.BytesIO(load_from_drive(URL_GRAPHS)))
-all_partitions = pickle.load(io.BytesIO(load_from_drive(URL_PARTS)))
+# Chargement sécurisé Pickle
+graphs_data = io.BytesIO(load_from_drive(URL_GRAPHS))
+parts_data = io.BytesIO(load_from_drive(URL_PARTS))
+
+all_graphs = pickle.load(graphs_data)
+all_partitions = pickle.load(parts_data)
 
 # ------------------- THEME CSS -------------------
 st.markdown("""
@@ -32,7 +41,6 @@ h2 { color: #4F46E5; font-weight: 700; margin-top: 30px; }
 
 # ------------------- TITLE -------------------
 st.title("🎮 Recommandation de Jeux - SNA")
-
 st.write("Système de recommandation basé sur les graphes et les communautés Louvain.")
 
 # ===========================================================
@@ -84,21 +92,24 @@ if st.button("Recommander pour cet utilisateur"):
             if g in all_partitions[y]:
                 community_list.append(all_partitions[y][g])
 
-        dominant_comm = Counter(community_list).most_common(1)[0][0]
-        st.info(f"Communauté dominante : **{dominant_comm}**")
+        if len(community_list) == 0:
+            st.error("Aucune communauté trouvée pour cet utilisateur.")
+        else:
+            dominant_comm = Counter(community_list).most_common(1)[0][0]
+            st.info(f"Communauté dominante : **{dominant_comm}**")
 
-        sample_year = int(user_games["year"].mode()[0])
-        G = all_graphs[sample_year]
-        part = all_partitions[sample_year]
+            sample_year = int(user_games["year"].mode()[0])
+            G = all_graphs[sample_year]
+            part = all_partitions[sample_year]
 
-        comm_games = [g for g, c in part.items() if c == dominant_comm]
-        played = user_games["asin"].tolist()
+            comm_games = [g for g, c in part.items() if c == dominant_comm]
+            played = user_games["asin"].tolist()
 
-        recos = [g for g in comm_games if g not in played]
-        top = sorted(recos, key=lambda g: G.degree(g), reverse=True)[:10]
+            recos = [g for g in comm_games if g not in played]
+            top = sorted(recos, key=lambda g: G.degree(g), reverse=True)[:10]
 
-        st.success("Recommandations personnalisées :")
-        st.write(top)
+            st.success("Recommandations personnalisées :")
+            st.write(top)
 
 # ===========================================================
 # 3️⃣ Recommandation PAR COMMUNAUTÉ
