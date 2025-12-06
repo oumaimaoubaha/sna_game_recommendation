@@ -7,44 +7,47 @@ import requests
 import io
 
 # ===========================================================
-# 📌 1. Fonction de téléchargement depuis Google Drive
+# 📌 1. Fonction fiable pour télécharger un fichier Drive
 # ===========================================================
-
-def load_from_drive(url):
-    """Télécharge un fichier Google Drive et retourne son contenu brut."""
+def load_from_drive(file_id):
+    """Télécharge un fichier Google Drive via son ID."""
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
     response = requests.get(url)
     return response.content
 
 
 # ===========================================================
-# 📌 2. URLs Google Drive (format ?export=download)
+# 📌 2. IDs Drive (PAS LES URLs ENTIÈRES)
 # ===========================================================
-
-URL_DF = "https://drive.google.com/uc?export=download&id=1BBVNK0RgL3S4PryNmYNse70C4L8SGhsk"
-URL_GRAPHS = "https://drive.google.com/uc?export=download&id=1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"
-URL_PARTS = "https://drive.google.com/uc?export=download&id=1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
+ID_DF = "1BBVNK0RgL3S4PryNmYNse70C4L8SGhsk"
+ID_GRAPHS = "1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"
+ID_PARTS = "1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
 
 
 # ===========================================================
 # 📌 3. Chargement des fichiers
 # ===========================================================
+st.write("⏳ Chargement des données...")
 
-# Chargement dataset CSV (CORRECTIF ENCODAGE)
-df_bytes = load_from_drive(URL_DF)
-df = pd.read_csv(io.BytesIO(df_bytes), encoding="latin1")   # <<< SOLUTION UnicodeDecodeError
+# CSV
+df = pd.read_csv(
+    io.BytesIO(load_from_drive(ID_DF)),
+    encoding="utf-8",
+    on_bad_lines="skip"
+)
 
-# Chargement graphes et partitions
-graphs_bytes = load_from_drive(URL_GRAPHS)
-parts_bytes = load_from_drive(URL_PARTS)
+# Pickle graphes
+all_graphs = pickle.load(io.BytesIO(load_from_drive(ID_GRAPHS)))
 
-all_graphs = pickle.load(io.BytesIO(graphs_bytes))
-all_partitions = pickle.load(io.BytesIO(parts_bytes))
+# Pickle partitions
+all_partitions = pickle.load(io.BytesIO(load_from_drive(ID_PARTS)))
+
+st.success("✔️ Données chargées avec succès !")
 
 
 # ===========================================================
-# 🖌️ 4. Thème CSS
+# 🎨 4. Thème CSS
 # ===========================================================
-
 st.markdown("""
 <style>
 html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
@@ -57,15 +60,13 @@ h2 { color: #4F46E5; font-weight: 700; margin-top: 30px; }
 # ===========================================================
 # 🏷️ 5. Titre
 # ===========================================================
-
-st.title("🎮 Recommandation de Jeux – Analyse de Réseaux (SNA)")
-st.write("Système de recommandation basé sur les graphes et les communautés Louvain.")
+st.title("🎮 Recommandation de Jeux – Analyse SNA")
+st.write("Recommandations basées sur les graphes et les communautés Louvain.")
 
 
 # ===========================================================
 # 🔵 6. Recommandation PAR JEU
 # ===========================================================
-
 st.header("🔵 Recommandation par Jeu")
 
 asin = st.text_input("Entrer un ASIN")
@@ -83,7 +84,6 @@ if st.button("Recommander pour ce jeu"):
             st.error("Ce jeu n'existe pas dans cette année.")
         else:
             st.info(f"Communauté du jeu : **{comm}**")
-
             comm_games = [g for g, c in part.items() if c == comm and g != asin]
             top = sorted(comm_games, key=lambda g: G.degree(g), reverse=True)[:10]
 
@@ -96,7 +96,6 @@ if st.button("Recommander pour ce jeu"):
 # ===========================================================
 # 🟢 7. Recommandation PAR UTILISATEUR
 # ===========================================================
-
 st.header("🟢 Recommandation par Utilisateur")
 
 user = st.text_input("Entrer un reviewerID")
@@ -132,9 +131,8 @@ if st.button("Recommander pour cet utilisateur"):
 
 
 # ===========================================================
-# 🔴 8. Exploration d'une Communauté
+# 🔴 8. Explorer une communauté
 # ===========================================================
-
 st.header("🔴 Explorer une Communauté")
 
 year_c = st.number_input("Année de la communauté", min_value=1999, max_value=2018, step=1)
