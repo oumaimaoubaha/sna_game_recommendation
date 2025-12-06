@@ -6,46 +6,69 @@ import pickle
 import requests
 import io
 
-# ------------------- TELECHARGEMENT DES FICHIERS -------------------
+# ============================================================
+#  FONCTION ROBUSTE POUR TÉLÉCHARGER DE GOOGLE DRIVE
+# ============================================================
+def download_drive_file(file_id):
+    URL = "https://drive.google.com/uc?export=download"
+    session = requests.Session()
 
-def load_from_drive(url):
-    response = requests.get(url)
+    # 1) Premier appel — Google renvoie une page HTML avec un token
+    response = session.get(URL, params={'id': file_id}, stream=True)
+    token = None
+
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            token = value
+
+    # 2) Si un token existe → re-télécharger le vrai fichier
+    if token:
+        response = session.get(
+            URL,
+            params={'id': file_id, 'confirm': token},
+            stream=True
+        )
+
     return response.content
 
-URL_DF = "https://drive.google.com/uc?export=download&id=1BBVNK0RgL3S4PryNmYNse70C4L8SGhsk"
-URL_GRAPHS = "https://drive.google.com/uc?export=download&id=1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"
-URL_PARTS = "https://drive.google.com/uc?export=download&id=1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
 
-# Chargement sécurisé CSV
-df = pd.read_csv(
-    io.BytesIO(load_from_drive(URL_DF)),
-    encoding="utf-8",
-    errors="ignore"
-)
+# ============================================================
+#  IDS DES FICHIERS GOOGLE DRIVE
+# ============================================================
+ID_DF = "1BBVNK0RgL3S4PryNmYNse70C4L8SGhsk"
+ID_GRAPHS = "1bcFb6RNp1SDEetOhAhSBwSKNnXs2DDjQ"
+ID_PARTS = "1jnmc_2HDaAzyifwXROl8A-1qdf7Vzbck"
 
-# Chargement sécurisé Pickle
-graphs_data = io.BytesIO(load_from_drive(URL_GRAPHS))
-parts_data = io.BytesIO(load_from_drive(URL_PARTS))
 
-all_graphs = pickle.load(graphs_data)
-all_partitions = pickle.load(parts_data)
+# ============================================================
+#  CHARGEMENT DES DONNÉES VIA DRIVE
+# ============================================================
+st.write("⏳ Chargement des données depuis Google Drive...")
 
-# ------------------- THEME CSS -------------------
-st.markdown("""
-<style>
-html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
-h1 { color: #1F2937; font-weight: 800; }
-h2 { color: #4F46E5; font-weight: 700; margin-top: 30px; }
-</style>
-""", unsafe_allow_html=True)
+df_bytes = download_drive_file(ID_DF)
+graphs_bytes = download_drive_file(ID_GRAPHS)
+parts_bytes = download_drive_file(ID_PARTS)
 
-# ------------------- TITLE -------------------
-st.title("🎮 Recommandation de Jeux - SNA")
-st.write("Système de recommandation basé sur les graphes et les communautés Louvain.")
+# Chargement CSV
+df = pd.read_csv(io.BytesIO(df_bytes), encoding="utf-8", errors="ignore")
 
-# ===========================================================
-# 1️⃣ Recommandation PAR JEU
-# ===========================================================
+# Chargement pickles
+all_graphs = pickle.load(io.BytesIO(graphs_bytes))
+all_partitions = pickle.load(io.BytesIO(parts_bytes))
+
+st.success("✔️ Données chargées avec succès !")
+
+
+# ============================================================
+#  INTERFACE STREAMLIT
+# ============================================================
+st.title("🎮 Recommandation de Jeux – Analyse de Réseaux (SNA)")
+st.write("Système basé sur les communautés Louvain + interactions entre jeux.")
+
+
+# ============================================================
+# 1️⃣ RECOMMANDATION PAR JEU
+# ============================================================
 st.header("🔵 Recommandation par Jeu")
 
 asin = st.text_input("Entrer un ASIN")
@@ -54,8 +77,8 @@ year = st.number_input("Année", min_value=1999, max_value=2018, step=1)
 if st.button("Recommander pour ce jeu"):
     if year in all_graphs and asin in all_partitions[year]:
 
-        part = all_partitions[year]
         G = all_graphs[year]
+        part = all_partitions[year]
 
         comm = part.get(asin)
 
@@ -70,11 +93,12 @@ if st.button("Recommander pour ce jeu"):
             st.success("Top recommandations :")
             st.write(top)
     else:
-        st.error("ASIN non trouvé.")
+        st.error("ASIN non trouvé dans l'année sélectionnée.")
 
-# ===========================================================
-# 2️⃣ Recommandation PAR UTILISATEUR
-# ===========================================================
+
+# ============================================================
+# 2️⃣ RECOMMANDATION PAR UTILISATEUR
+# ============================================================
 st.header("🟢 Recommandation par Utilisateur")
 
 user = st.text_input("Entrer un reviewerID")
@@ -92,7 +116,7 @@ if st.button("Recommander pour cet utilisateur"):
             if g in all_partitions[y]:
                 community_list.append(all_partitions[y][g])
 
-        if len(community_list) == 0:
+        if not community_list:
             st.error("Aucune communauté trouvée pour cet utilisateur.")
         else:
             dominant_comm = Counter(community_list).most_common(1)[0][0]
@@ -111,9 +135,10 @@ if st.button("Recommander pour cet utilisateur"):
             st.success("Recommandations personnalisées :")
             st.write(top)
 
-# ===========================================================
-# 3️⃣ Recommandation PAR COMMUNAUTÉ
-# ===========================================================
+
+# ============================================================
+# 3️⃣ RECOMMANDATION PAR COMMUNAUTÉ
+# ============================================================
 st.header("🔴 Explorer une Communauté")
 
 year_c = st.number_input("Année de la communauté", min_value=1999, max_value=2018, step=1)
@@ -132,3 +157,5 @@ if st.button("Afficher la communauté"):
             top = sorted(comm_games, key=lambda g: G.degree(g), reverse=True)[:15]
             st.success(f"Top jeux de la communauté {comm_c}")
             st.write(top)
+    else:
+        st.error("Année invalide.")
